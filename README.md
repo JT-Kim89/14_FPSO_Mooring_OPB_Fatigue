@@ -182,6 +182,27 @@ python ni604_opb_fatigue.py ni604_input.csv `
   --exposure-years 20
 ```
 
+## Validation
+
+Public literature usually provides equations, coefficients, figures, and damage tables, but not the full raw tension/angle time series. Because of that, the current validation package checks constants and published trends rather than claiming exact one-to-one reproduction.
+
+Validation files:
+
+| File | Role |
+| --- | --- |
+| `validation/literature_benchmarks.md` | Public references, validation scope, and limitations. |
+| `validation/mdpi_2024_table8_damage_life.csv` | Published total damage and life from MDPI 2024 Table 8. |
+| `validation/mdpi_2024_appendix_a4_subset.csv` | Published case-by-case damage subset from MDPI 2024 Appendix Table A4. |
+| `validation/check_mdpi_trends.py` | Automated checks for code constants and literature damage trends. |
+
+Run:
+
+```powershell
+python validation/check_mdpi_trends.py
+```
+
+The check confirms that the code uses the expected studless-chain hotspot SCFs, the default free-corrosion S-N curve, the Table 8 damage/life ordering, and the governing-hotspot pattern in the transcribed Appendix A4 subset.
+
 ## Modeling Notes
 
 - OPB fatigue cannot be calculated from tension alone. Interlink angle or interlink moment is required.
