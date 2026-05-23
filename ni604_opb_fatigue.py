@@ -106,6 +106,9 @@ def ni604_interlink_moment_Nmm(
     tension = np.asarray(tension_kN, dtype=float)
     abs_angle = np.abs(angle)
 
+    # Appendix 1 expresses the nonlinear interlink bending moment with
+    # empirical angle functions P(alpha), a(alpha), and b(alpha). The input
+    # angle is kept signed, but the empirical formula uses its magnitude.
     c = 354.0
     g = 0.93
     p_alpha = abs_angle + 0.307 * abs_angle**3 + 0.048 * abs_angle**5
@@ -135,6 +138,8 @@ def ni604_interlink_moment_Nmm(
     )
 
     if apply_sliding_limit:
+        # Sliding at the contact limits the transferable interlink moment.
+        # Keep the sign from the prescribed interlink rotation.
         threshold = friction_coefficient * tension * 1000.0 * diameter_mm / 2.0
         moment = np.sign(moment) * np.minimum(np.abs(moment), np.maximum(threshold, 0.0))
 
@@ -170,6 +175,8 @@ def stress_components_MPa(
     if hotspot_key == "C":
         scf["OPB"] *= config.gamma_tt
 
+    # Stress components are computed as time series so rainflow can be applied
+    # after TT, OPB, and IPB are combined at each hotspot.
     sigma_tt = scf["TT"] * 2.0 * tension * 1000.0 / (math.pi * d**2)
     sigma_opb = scf["OPB"] * 16.0 * opb_moment / (math.pi * d**3)
     sigma_ipb = scf["IPB"] * config.ipb_alpha * ipb_moment / (math.pi * d**3)
@@ -194,6 +201,9 @@ def combined_stress_MPa(
         config=config,
         hotspot=hotspot,
     )
+    # The OPB/IPB signs depend on the physical hotspot side. For screening,
+    # fatigue_from_dataframe evaluates all sign combinations and governs by
+    # maximum damage.
     return config.z_corr * (
         sigma_tt
         + opb_sign * config.z_stiffness * sigma_opb
@@ -257,6 +267,8 @@ def rainflow_cycles(series: Iterable[float] | np.ndarray) -> pd.DataFrame:
     for point in _reversals(series):
         points.append(point)
 
+        # ASTM-style stack counting: when the newest range closes or exceeds
+        # the previous range, the older range becomes a counted cycle.
         while len(points) >= 3:
             x1, x2, x3 = points[-3][1], points[-2][1], points[-1][1]
             newer_range = abs(x3 - x2)
@@ -355,6 +367,8 @@ def fatigue_from_dataframe(
         opb_moment = df[opb_moment_column].to_numpy(dtype=float)
         opb_source = opb_moment_column
     elif opb_angle_column in df.columns:
+        # If only interlink angles are available, derive moments from the
+        # same nonlinear relation used by the FEM rotational springs.
         opb_moment = ni604_interlink_moment_Nmm(
             df[opb_angle_column].to_numpy(dtype=float),
             tension,
@@ -390,6 +404,8 @@ def fatigue_from_dataframe(
     if exposure_seconds is not None:
         if duration is None or duration <= 0.0:
             raise ValueError("dt_s or time_column is required when exposure_seconds is used")
+        # Scale rainflow damage from the simulated duration to the requested
+        # exposure duration; occurrence_probability handles sea-state weighting.
         exposure_scale *= exposure_seconds / duration
 
     results: dict[str, object] = {

@@ -96,6 +96,8 @@ class OC5MooringLine:
     @property
     def geometry(self) -> MooringGeometry:
         angle = math.radians(self.heading_deg)
+        # OC5 line headings are represented as radial fairlead/anchor
+        # locations around the platform center in the body/global XY plane.
         fairlead = (
             self.fairlead_radius_m * math.cos(angle),
             self.fairlead_radius_m * math.sin(angle),
@@ -223,6 +225,8 @@ def _reference_chain_basis(
     line_axis = _unit(anchor_global_m - (origin_global_m + fairlead_body_m))
     global_up = np.array([0.0, 0.0, 1.0])
 
+    # The vertical plane containing the nominal line defines "in-plane".
+    # Its normal direction defines "out-of-plane" for the fairlead angle.
     out_of_plane = np.cross(global_up, line_axis)
     if np.linalg.norm(out_of_plane) < 1.0e-9:
         out_of_plane = np.array([0.0, 1.0, 0.0])
@@ -260,6 +264,8 @@ def fps_motion_to_fairlead_angles(
         vessel_translation = origin_global + np.array([surge[i], sway[i], heave[i]])
         fairlead_global = vessel_translation + rotation @ fairlead_body
 
+        # The actual top-line direction points from the moved fairlead toward
+        # the fixed anchor. The nominal chain-stopper basis rotates with FPSO.
         actual_line_axis = _unit(anchor_global - fairlead_global)
         fcs_line_axis = rotation @ line_axis_body
         fcs_in_plane = rotation @ in_plane_body
@@ -276,6 +282,7 @@ def fps_motion_to_fairlead_angles(
                 "fairlead_z_m": float(fairlead_global[2]),
                 "line_length_m": float(np.linalg.norm(anchor_global - fairlead_global)),
                 "fairlead_angle_in_plane_deg": math.degrees(
+                    # atan2 keeps the sign and stays stable for small angles.
                     math.atan2(in_plane_component, axial_component)
                 ),
                 "fairlead_angle_out_of_plane_deg": math.degrees(
@@ -308,6 +315,8 @@ def build_ni604_input_from_fps_motion(
     elif tension_estimate is not None:
         reference_length = float(angles["line_length_m"].iloc[0])
         extension = angles["line_length_m"].to_numpy(dtype=float) - reference_length
+        # This is a quasi-static screening estimate. A production workflow
+        # should use mooring-analysis tension if it is available.
         tension = (
             tension_estimate.pretension_kN
             + tension_estimate.line_stiffness_kN_per_m * extension
@@ -319,6 +328,8 @@ def build_ni604_input_from_fps_motion(
         )
 
     if angle_model == "decay":
+        # Fast screening model: prescribe how much of the fairlead angle is
+        # assigned to the selected top-chain interlink.
         factor = geometry.interlink_angle_factor()
         output["opb_interlink_angle_deg"] = angles["fairlead_angle_out_of_plane_deg"] * factor
         output["ipb_interlink_angle_deg"] = angles["fairlead_angle_in_plane_deg"] * factor
@@ -329,6 +340,8 @@ def build_ni604_input_from_fps_motion(
             raise ValueError(
                 "top_link_index selects an interlink and must be less than FEM link_count"
             )
+        # More physical screening model: solve a 1D beam/rotational-spring
+        # top-chain model in the OPB and IPB planes independently.
         opb_interlinks = solve_interlink_angles_deg(
             angles["fairlead_angle_out_of_plane_deg"].to_numpy(dtype=float),
             output["tension_kN"].to_numpy(dtype=float),
@@ -416,6 +429,8 @@ def _beam_config_from_args(
     elastic_modulus_pa = args.beam_e_pa
 
     if oc5_line is not None:
+        # OC5 uses a brass chain model; keep E overridable because real steel
+        # mooring chain should use a different elastic modulus.
         link_length_m = link_length_m or oc5_line.link_inner_length_m
         bar_diameter_m = bar_diameter_m or oc5_line.chain_bar_diameter_m
         elastic_modulus_pa = elastic_modulus_pa or 100.0e9

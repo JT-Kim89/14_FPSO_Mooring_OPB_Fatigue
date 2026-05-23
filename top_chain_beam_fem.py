@@ -25,6 +25,8 @@ from ni604_opb_fatigue import ni604_interlink_moment_Nmm
 
 @dataclass(frozen=True)
 class TopChainBeamConfig:
+    # The default values are tuned for the OC5 brass-chain screening example.
+    # Override bar diameter, link length, and E for project steel chain cases.
     link_count: int = 20
     link_length_m: float = 0.42
     bar_diameter_m: float = 0.0779
@@ -89,6 +91,8 @@ def _secant_joint_stiffness_Nm_per_rad(
 ) -> np.ndarray:
     abs_angle_rad = np.maximum(np.abs(angle_rad), math.radians(1.0e-4))
     angle_deg = np.degrees(abs_angle_rad)
+    # The nonlinear NI604 moment relation is converted to an equivalent
+    # secant rotational stiffness, k = M / theta, for each interlink.
     moment_Nm = (
         ni604_interlink_moment_Nmm(
             angle_deg,
@@ -111,6 +115,12 @@ def _assemble_stiffness(
     node_count = link_count + 1
     dof_count = node_count + 2 * link_count
 
+    # DOF layout:
+    #   0..link_count                  : transverse node translations
+    #   node_count + 2*link            : left-end rotation of each link
+    #   node_count + 2*link + 1        : right-end rotation of each link
+    # Rotations are duplicated at interlinks so rotational springs can carry
+    # a relative angle between adjacent link ends.
     stiffness = np.zeros((dof_count, dof_count), dtype=float)
     element_k = _beam_bending_stiffness(
         config.flexural_rigidity_Nm2,
@@ -122,6 +132,8 @@ def _assemble_stiffness(
     )
 
     for link in range(link_count):
+        # Each physical link contributes beam bending plus geometric stiffness
+        # from axial tension. Positive tension stiffens lateral bending.
         dofs = [
             link,
             _rotation_left_dof(link, node_count),
@@ -133,6 +145,8 @@ def _assemble_stiffness(
                 stiffness[row_global, col_global] += element_k[row_local, col_local]
 
     for joint in range(link_count - 1):
+        # Interlink contact is represented by a rotational spring between the
+        # right rotation of the previous link and the left rotation of the next.
         k = joint_stiffness_Nm_per_rad[joint]
         left = _rotation_right_dof(joint, node_count)
         right = _rotation_left_dof(joint + 1, node_count)
@@ -170,6 +184,8 @@ def solve_interlink_angles_for_step_deg(
     joint_stiffness = _secant_joint_stiffness_Nm_per_rad(joint_angles, tension_kN, config)
     displacements = np.zeros(dof_count, dtype=float)
 
+    # Apply fairlead relative angle at the first link. The far node is pinned
+    # in translation; optionally its last-link rotation can also be aligned.
     fixed_values = {
         0: 0.0,
         link_count: 0.0,
@@ -204,6 +220,8 @@ def solve_interlink_angles_for_step_deg(
         max_change = float(np.max(np.abs(new_joint_angles - joint_angles)))
         joint_angles = new_joint_angles
 
+        # Recompute nonlinear interlink stiffness from the solved angle and
+        # relax the update to avoid stiffness chatter near the sliding limit.
         updated_stiffness = _secant_joint_stiffness_Nm_per_rad(joint_angles, tension_kN, config)
         joint_stiffness = (
             config.stiffness_relaxation * updated_stiffness
